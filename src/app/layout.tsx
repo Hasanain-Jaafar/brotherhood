@@ -22,7 +22,7 @@ const zain = Zain({
 
 export const metadata: Metadata = {
   title: "ملتقى الإخوة",
-  description: "مكان دافئ يجمع الأصدقاء لمشاركة الأغاني واليوميات والصور والبقاء على تواصل.",
+  description: "مكان دافئ يجمع الأصدقاء لمشاركة اليوميات والصور والبقاء على تواصل.",
   applicationName: "ملتقى الإخوة",
   icons: {
     icon: [

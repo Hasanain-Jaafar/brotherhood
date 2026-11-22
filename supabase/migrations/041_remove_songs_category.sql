@@ -1,0 +1,11 @@
+-- The "songs" (أغاني) category was removed from the app. Move existing
+-- song posts to "diaries" so they stay visible under a valid category,
+-- then stop accepting "songs".
+
+update public.posts set category = 'diaries' where category = 'songs';
+
+alter table public.posts
+  drop constraint if exists posts_category_check;
+alter table public.posts
+  add constraint posts_category_check
+  check (category in ('diaries', 'images'));

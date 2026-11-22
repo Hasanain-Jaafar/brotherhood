@@ -94,7 +94,6 @@ export default async function PublicProfilePage({
 
   const isFollowing = !!followRow;
 
-  const songCount = posts?.filter((p) => p.category === "songs").length ?? 0;
   const imageCount = posts?.filter((p) => p.category === "images").length ?? 0;
   const videoCount = posts?.filter(isVideoPost).length ?? 0;
 
@@ -202,7 +201,6 @@ export default async function PublicProfilePage({
             <div className="text-sm">
               <p className="font-medium text-foreground">
                 {[
-                  t("songsCount", { count: songCount }),
                   t("imagesCount", { count: imageCount }),
                   t("videosCount", { count: videoCount }),
                 ].join(" · ")}

@@ -7,7 +7,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "ملتقى الإخوة",
     short_name: "الإخوة",
     description:
-      "مكان دافئ يجمع الأصدقاء لمشاركة الأغاني واليوميات والصور والبقاء على تواصل.",
+      "مكان دافئ يجمع الأصدقاء لمشاركة اليوميات والصور والبقاء على تواصل.",
     lang: "ar",
     dir: "rtl",
     start_url: "/dashboard",
