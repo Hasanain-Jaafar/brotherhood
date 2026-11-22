@@ -1,0 +1,49 @@
+import { getTranslations } from "next-intl/server";
+import { Link } from "@/i18n/navigation";
+import { CATEGORY_SOLID, POST_CATEGORIES, type PostCategory } from "@/lib/post-categories";
+import { cn } from "@/lib/utils";
+
+export async function CategoryFilterBar({ active }: { active: PostCategory | null }) {
+  const t = await getTranslations("feed");
+
+  return (
+    <div className="sticky -top-4 z-10 -mx-4 bg-background/95 px-4 backdrop-blur supports-backdrop-filter:bg-background/60 md:-top-6 md:-mx-6 md:px-6">
+      <div className="relative">
+        <div className="flex gap-2 overflow-x-auto scroll-px-4 snap-x snap-mandatory scrollbar-hide py-2">
+          {/* Auto margins on the end spacers center the chips when they fit, and collapse to 0 when they
+              overflow so the row still scrolls from the first chip. */}
+          <div className="ms-auto w-0 shrink-0" aria-hidden />
+          <Link
+            href="/dashboard"
+            className={cn(
+              "flex shrink-0 snap-start items-center rounded-full px-5 py-2 text-base font-medium whitespace-nowrap transition-all",
+              active === null
+                ? "bg-foreground text-background shadow-md shadow-foreground/20"
+                : "border border-border/40 bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground",
+            )}
+          >
+            {t("all")}
+          </Link>
+          {POST_CATEGORIES.map((c) => {
+            const selected = active === c;
+            return (
+              <Link
+                key={c}
+                href={`/dashboard?category=${c}`}
+                className={cn(
+                  "flex shrink-0 snap-start items-center rounded-full px-5 py-2 text-base font-medium whitespace-nowrap transition-all",
+                  selected
+                    ? CATEGORY_SOLID[c]
+                    : "border border-border/40 bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground",
+                )}
+              >
+                {t(`categories.${c}`)}
+              </Link>
+            );
+          })}
+          <div className="me-auto w-0 shrink-0" aria-hidden />
+        </div>
+      </div>
+    </div>
+  );
+}

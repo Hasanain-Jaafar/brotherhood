@@ -1,0 +1,47 @@
+import { redirect } from "next/navigation";
+import { getTranslations, setRequestLocale } from "next-intl/server";
+import { createClient, getUser } from "@/lib/supabase/server";
+import { ProfileForm } from "@/components/profile/profile-form";
+
+export default async function ProfilePage({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}) {
+  const { locale } = await params;
+  setRequestLocale(locale);
+  const supabase = await createClient();
+  const t = await getTranslations("profile");
+  const {
+    data: { user },
+  } = await getUser();
+  if (!user) redirect("/sign-in");
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", user.id)
+    .single();
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">{t("editProfile")}</h1>
+      </div>
+      <ProfileForm
+        userId={user.id}
+        email={user.email}
+        initialName={profile?.name ?? null}
+        initialBio={profile?.bio ?? null}
+        initialAvatarUrl={profile?.avatar_url ?? null}
+        initialLocation={profile?.location ?? null}
+        initialPronouns={profile?.pronouns ?? null}
+        initialInterests={profile?.interests ?? null}
+        initialBirthday={profile?.birthday ?? null}
+        initialShowBirthday={profile?.show_birthday ?? null}
+        initialShowAge={profile?.show_age ?? null}
+        initialShowLocation={profile?.show_location ?? null}
+      />
+    </div>
+  );
+}

@@ -1,0 +1,156 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { safeInternalPath } from "@/lib/safe-path";
+import { createClient } from "@/lib/supabase/server";
+import { createPostSchema, updatePostSchema } from "@/lib/validations/post";
+import { notifyMentionedUsers } from "./mentions";
+import { getBunnyVideoOrientation } from "./bunny";
+
+const RATE_LIMIT_POSTS_PER_HOUR = 30;
+
+export type PostResult = { success: true; postId?: string } | { success: false; error: string };
+
+export async function createPost(
+  input: {
+    content: string;
+    image_url?: string | null;
+    image_width?: number | null;
+    image_height?: number | null;
+    video_url?: string | null;
+    video_orientation?: "landscape" | "portrait" | null;
+    media_type?: string | null;
+    category: string;
+  }
+): Promise<PostResult> {
+  const parsed = createPostSchema.safeParse(input);
+  if (!parsed.success) {
+    const msg = parsed.error.issues[0]?.message ?? "Invalid input.";
+    return { success: false, error: msg };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { success: false, error: "Not authenticated." };
+
+  const { count } = await supabase
+    .from("posts")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id)
+    .gte("created_at", new Date(Date.now() - 60 * 60 * 1000).toISOString());
+
+  if (count !== null && count >= RATE_LIMIT_POSTS_PER_HOUR) {
+    return { success: false, error: "Rate limit: try again later." };
+  }
+
+  // Determine media type
+  let mediaType = "text";
+  if (parsed.data.media_type) {
+    mediaType = parsed.data.media_type;
+  } else if (parsed.data.image_url) {
+    const url = parsed.data.image_url.toLowerCase();
+    if (url.includes(".gif") || url.includes("gif")) {
+      mediaType = "gif";
+    } else if (url.includes(".mp4") || url.includes(".webm") || url.includes("video")) {
+      mediaType = "video";
+    } else {
+      mediaType = "image";
+    }
+  }
+
+  // When a Bunny embed link was pasted in directly (rather than uploaded through
+  // the app), orientation isn't known client-side — look it up server-side.
+  let videoOrientation = parsed.data.video_orientation ?? null;
+  if (!videoOrientation && parsed.data.video_url) {
+    videoOrientation = await getBunnyVideoOrientation(parsed.data.video_url);
+  }
+
+  const { data: post, error } = await supabase
+    .from("posts")
+    .insert({
+      user_id: user.id,
+      content: parsed.data.content.trim(),
+      image_url: parsed.data.image_url ?? null,
+      image_width: parsed.data.image_width ?? null,
+      image_height: parsed.data.image_height ?? null,
+      video_url: parsed.data.video_url ?? null,
+      video_orientation: videoOrientation,
+      media_type: parsed.data.video_url && mediaType === "text" ? "video" : mediaType,
+      category: parsed.data.category,
+    })
+    .select("id")
+    .single();
+
+  if (error) return { success: false, error: error.message };
+
+  // Notify mentioned users (non-blocking - fire and forget)
+  notifyMentionedUsers(post.id, parsed.data.content, user.id).catch(console.error);
+
+  revalidatePath("/dashboard");
+  revalidatePath("/profile");
+  return { success: true, postId: post.id };
+}
+
+export async function updatePost(
+  postId: string,
+  input: { content: string; image_url?: string | null; video_url?: string | null; category: string }
+): Promise<PostResult> {
+  const parsed = updatePostSchema.safeParse(input);
+  if (!parsed.success) {
+    const msg = parsed.error.issues[0]?.message ?? "Invalid input.";
+    return { success: false, error: msg };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { success: false, error: "Not authenticated." };
+
+  const { error } = await supabase
+    .from("posts")
+    .update({
+      content: parsed.data.content.trim(),
+      image_url: parsed.data.image_url ?? null,
+      video_url: parsed.data.video_url ?? null,
+      category: parsed.data.category,
+    })
+    .eq("id", postId)
+    .eq("user_id", user.id);
+
+  if (error) return { success: false, error: error.message };
+  revalidatePath("/dashboard");
+  revalidatePath("/profile");
+  revalidatePath(`/u/${user.id}`);
+  return { success: true };
+}
+
+/**
+ * Deletes one of the caller's posts. Pass `redirectTo` when deleting from the post's
+ * own page: redirecting inside the action avoids re-rendering the (now missing) post,
+ * which would otherwise show a 404.
+ */
+export async function deletePost(postId: string, redirectTo?: string): Promise<PostResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { success: false, error: "Not authenticated." };
+
+  const { error } = await supabase
+    .from("posts")
+    .delete()
+    .eq("id", postId)
+    .eq("user_id", user.id);
+
+  if (error) return { success: false, error: error.message };
+  revalidatePath("/dashboard");
+  revalidatePath("/profile");
+  revalidatePath(`/u/${user.id}`);
+  const target = safeInternalPath(redirectTo);
+  if (target) redirect(target);
+  return { success: true };
+}

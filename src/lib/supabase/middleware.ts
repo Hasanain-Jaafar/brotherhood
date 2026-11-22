@@ -1,0 +1,64 @@
+import { createServerClient } from "@supabase/ssr";
+import { NextResponse, type NextRequest } from "next/server";
+
+export async function updateSession(request: NextRequest) {
+  let response = NextResponse.next({
+    request,
+  });
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) {
+    return response;
+  }
+
+  const supabase = createServerClient(
+    url,
+    key,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) =>
+            response.cookies.set(name, value, options)
+          );
+        },
+      },
+    }
+  );
+
+  // getClaims() refreshes an expired session (writing new cookies via setAll)
+  // and verifies the JWT locally, so this doesn't cost a round trip to Supabase
+  // Auth on every request, prefetch and server action.
+  const { data } = await supabase.auth.getClaims();
+  const user = data?.claims ?? null;
+
+  const pathWithoutLocale =
+    request.nextUrl.pathname.replace(/^\/(en|ar)(?=\/|$)/, "") || "/";
+  const isSignUpRoute =
+    pathWithoutLocale === "/sign-up" || pathWithoutLocale.startsWith("/sign-up/");
+
+  if (isSignUpRoute) {
+    return NextResponse.redirect(new URL("/sign-in", request.url));
+  }
+
+  const isAuthPage = request.nextUrl.pathname.startsWith("/sign-in");
+  const isProtectedRoute =
+    request.nextUrl.pathname.startsWith("/dashboard") ||
+    request.nextUrl.pathname.startsWith("/profile") ||
+    request.nextUrl.pathname.startsWith("/u/");
+
+  if (isProtectedRoute && !user) {
+    const signInUrl = new URL("/sign-in", request.url);
+    signInUrl.searchParams.set("redirectTo", request.nextUrl.pathname);
+    return NextResponse.redirect(signInUrl);
+  }
+
+  if (isAuthPage && user) {
+    return NextResponse.redirect(new URL("/dashboard", request.url));
+  }
+
+  return response;
+}

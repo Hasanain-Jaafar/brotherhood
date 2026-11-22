@@ -1,0 +1,189 @@
+"use client";
+
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useTranslations } from "next-intl";
+import { Link } from "@/i18n/navigation";
+import { createClient } from "@/lib/supabase/client";
+import { signUpSchema, type SignUpInput } from "@/lib/validations/auth";
+import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
+import { startNavigationProgress } from "@/components/navigation-progress";
+import { Input } from "@/components/ui/input";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+
+export function SignUpForm() {
+  const router = useRouter();
+  const t = useTranslations("auth.signUp");
+  const [error, setError] = useState<string | null>(null);
+  // Stays pending until /dashboard has rendered, so the button doesn't reset mid-redirect.
+  const [redirecting, startRedirect] = useTransition();
+
+  const form = useForm<SignUpInput>({
+    resolver: zodResolver(signUpSchema),
+    defaultValues: { email: "", username: "", password: "", name: "" },
+  });
+  const busy = form.formState.isSubmitting || redirecting;
+
+  async function onSubmit(values: SignUpInput) {
+    setError(null);
+    const supabase = createClient();
+    const { error: signUpError } = await supabase.auth.signUp({
+      email: values.email,
+      password: values.password,
+      options: {
+        data: {
+          name: values.name || undefined,
+          full_name: values.name || undefined,
+          username: values.username.toLowerCase(),
+        },
+      },
+    });
+    if (signUpError) {
+      const msg = signUpError.message ?? "";
+      const friendly =
+        msg.toLowerCase().includes("rate limit") ||
+        msg.toLowerCase().includes("rate_limit")
+          ? t("rateLimit")
+          : msg.toLowerCase().includes("duplicate") ||
+            msg.toLowerCase().includes("unique")
+          ? t("usernameTaken")
+          : msg.toLowerCase().includes("domain not allowed")
+          ? t("domainBlocked")
+          : t("genericError");
+      setError(friendly);
+      return;
+    }
+    startNavigationProgress();
+    startRedirect(() => router.push("/dashboard"));
+  }
+
+  return (
+    <Card className="border-border/80 bg-card/95 shadow-xl shadow-primary/5 backdrop-blur-sm">
+      <CardHeader className="space-y-1.5 pb-2">
+        <CardTitle className="text-2xl tracking-tight">{t("title")}</CardTitle>
+        <CardDescription className="text-muted-foreground">
+          {t("description")}
+        </CardDescription>
+      </CardHeader>
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)}>
+          <CardContent className="space-y-4">
+            {error && (
+              <p className="text-sm text-destructive" role="alert">
+                {error}
+              </p>
+            )}
+            <FormField
+              control={form.control}
+              name="name"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t("name")}</FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder={t("namePlaceholder")}
+                      className="bg-muted/50 border-border focus-visible:ring-primary/30"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="username"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t("username")}</FormLabel>
+                  <FormControl>
+                    <Input
+                      autoComplete="username"
+                      placeholder={t("usernamePlaceholder")}
+                      className="bg-muted/50 border-border focus-visible:ring-primary/30"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="email"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t("email")}</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="email"
+                      placeholder={t("emailPlaceholder")}
+                      className="bg-muted/50 border-border focus-visible:ring-primary/30"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="password"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t("password")}</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="password"
+                      placeholder={t("passwordPlaceholder")}
+                      className="bg-muted/50 border-border focus-visible:ring-primary/30"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </CardContent>
+          <CardFooter className="flex flex-col gap-4 pt-2">
+            <Button
+              type="submit"
+              className="w-full h-11 font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 shadow-md shadow-primary/20"
+              disabled={busy}
+            >
+              {busy && <Spinner />}
+              {busy ? t("submitting") : t("submit")}
+            </Button>
+            <p className="text-sm text-muted-foreground text-center">
+              {t("hasAccount")}{" "}
+              <Link
+                href="/sign-in"
+                className="font-medium text-primary underline-offset-4 hover:underline"
+              >
+                {t("signInLink")}
+              </Link>
+            </p>
+          </CardFooter>
+        </form>
+      </Form>
+    </Card>
+  );
+}

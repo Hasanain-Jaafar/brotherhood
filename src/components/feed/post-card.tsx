@@ -1,0 +1,427 @@
+"use client";
+
+import { useState } from "react";
+import Image from "next/image";
+import { useRouter } from "next/navigation";
+import { useLocale, useTranslations } from "next-intl";
+import { Link } from "@/i18n/navigation";
+import { toast } from "sonner";
+import { MoreVertical, Pencil, Trash2 } from "lucide-react";
+import { CATEGORY_COLORS, CATEGORY_ICONS, POST_CATEGORIES, isPostCategory, type PostCategory } from "@/lib/post-categories";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Card, CardContent } from "@/components/ui/card";
+import { LikeButton } from "@/components/feed/like-button";
+import { CommentSection } from "@/components/feed/comment-section";
+import { VerifiedBadge } from "@/components/feed/verified-badge";
+import { cn, relativeTime } from "@/lib/utils";
+import { deletePost, updatePost } from "@/app/[locale]/(dashboard)/actions/posts";
+import { getVideoEmbed } from "@/lib/video-embed";
+import { linkifyHashtags } from "@/lib/linkify-hashtags";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+
+type CommentWithAuthor = {
+  id: string;
+  content: string;
+  created_at: string;
+  user_id: string;
+  parent_id?: string | null;
+  like_count?: number;
+  liked_by_me?: boolean;
+  author?: { name: string | null; avatar_url: string | null } | null;
+};
+
+export type PostCardProps = {
+  post: {
+    id: string;
+    content: string;
+    image_url: string | null;
+    image_width?: number | null;
+    image_height?: number | null;
+    video_url: string | null;
+    video_orientation?: "landscape" | "portrait" | null;
+    created_at: string;
+    user_id: string;
+    category?: string | null;
+  };
+  author: { name: string | null; avatar_url: string | null };
+  isVerified?: boolean;
+  verificationType?: "individual" | "organization" | "government" | null;
+  likeCount: number;
+  commentCount: number;
+  currentUserLiked: boolean;
+  // Omitted in the feed: CommentSection loads them when opened.
+  comments?: CommentWithAuthor[];
+  currentUserId: string;
+  likers: { name: string | null; avatar_url: string | null }[];
+  // Where to go after deleting this post. Set on the post's own page, which can't
+  // stay put once its post is gone; in lists the card just hides itself.
+  afterDeleteHref?: string;
+  // The card is visible on first paint (top of the feed, or the post's own page),
+  // so its image should download right away instead of waiting to be lazy-loaded.
+  priority?: boolean;
+};
+
+function VideoEmbed({ url, orientation }: { url: string; orientation?: "landscape" | "portrait" | null }) {
+  const embed = getVideoEmbed(url);
+  if (!embed) return null;
+
+  if (embed.kind === "youtube" || embed.kind === "tiktok" || embed.kind === "iframe") {
+    const isPortrait =
+      embed.kind === "tiktok" ||
+      (embed.kind === "youtube" && embed.isShorts) ||
+      (embed.kind === "iframe" && orientation === "portrait");
+    const aspect = isPortrait ? "aspect-[9/16] max-w-sm mx-auto" : "aspect-video";
+    return (
+      <div className={`mt-3 overflow-hidden rounded-xl bg-black ${aspect}`}>
+        <iframe
+          src={embed.embedSrc}
+          className="h-full w-full"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allowFullScreen
+          referrerPolicy="strict-origin-when-cross-origin"
+          loading="lazy"
+        />
+      </div>
+    );
+  }
+
+  if (embed.kind === "direct") {
+    return (
+      <div className="mt-3 overflow-hidden rounded-xl bg-muted">
+        <video
+          src={embed.src}
+          controls
+          controlsList="noplaybackrate"
+          playsInline
+          preload="metadata"
+          className="mx-auto block h-auto max-h-[600px] w-full"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <a
+      href={embed.href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="mt-3 block truncate rounded-xl border border-border/60 bg-muted/40 px-3 py-2 text-sm text-primary hover:bg-muted/60"
+    >
+      {embed.href}
+    </a>
+  );
+}
+
+function getInitials(name: string | null): string {
+  if (!name?.trim()) return "?";
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2)
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
+}
+
+export function PostCard({
+  post,
+  author,
+  isVerified = false,
+  verificationType = "individual",
+  likeCount,
+  commentCount,
+  currentUserLiked,
+  comments,
+  currentUserId,
+  likers,
+  afterDeleteHref,
+  priority = false,
+}: PostCardProps) {
+  const router = useRouter();
+  const t = useTranslations("feed.post");
+  const tCategories = useTranslations("feed.categories");
+  const locale = useLocale();
+  const category = isPostCategory(post.category) ? post.category : null;
+  const [editing, setEditing] = useState(false);
+  const [editContent, setEditContent] = useState(post.content);
+  const [editCategory, setEditCategory] = useState<PostCategory>(
+    (post.category as PostCategory) ?? "diaries",
+  );
+  const [saving, setSaving] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  // Posts added by "Load more" aren't re-rendered by router.refresh(), so hide the card ourselves.
+  const [deleted, setDeleted] = useState(false);
+  const isOwn = currentUserId === post.user_id;
+
+  async function handleSaveEdit() {
+    if (editContent.trim() === post.content && editCategory === post.category) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    const result = await updatePost(post.id, {
+      content: editContent.trim(),
+      image_url: post.image_url,
+      video_url: post.video_url,
+      category: editCategory,
+    });
+    setSaving(false);
+    if (result.success) {
+      setEditing(false);
+      router.refresh();
+    } else {
+      toast.error(result.error);
+    }
+  }
+
+  function handleDelete() {
+    setConfirmDeleteOpen(true);
+  }
+
+  async function confirmDelete() {
+    setDeleting(true);
+    // With afterDeleteHref the action redirects on success, so there's no result to handle.
+    const result = await deletePost(post.id, afterDeleteHref);
+    if (!result) return;
+    setDeleting(false);
+    if (result.success) {
+      setConfirmDeleteOpen(false);
+      setDeleted(true);
+      router.refresh();
+    } else {
+      toast.error(result.error);
+    }
+  }
+
+  if (deleted) return null;
+
+  return (
+    <Card className="overflow-hidden rounded-2xl border border-border/80 bg-card shadow-sm transition-shadow hover:shadow-md">
+      <CardContent className="p-0">
+        <div className="flex items-start justify-between gap-2 p-4 pb-2">
+          <Link
+            href={`/u/${post.user_id}`}
+            className="flex min-w-0 flex-1 items-center gap-3"
+          >
+            <Avatar className="size-10 shrink-0">
+              <AvatarImage src={author.avatar_url ?? undefined} />
+              <AvatarFallback className="text-sm">
+                {getInitials(author.name)}
+              </AvatarFallback>
+            </Avatar>
+            <div className="min-w-0">
+              <p className="flex items-center gap-1 font-semibold text-foreground truncate">
+                {author.name ?? t("someone")}
+                {isVerified && (
+                  <VerifiedBadge type={verificationType} size="sm" />
+                )}
+              </p>
+              <p className="text-xs text-muted-foreground" suppressHydrationWarning>
+                {relativeTime(post.created_at, locale)}
+              </p>
+            </div>
+          </Link>
+          <div className="flex shrink-0 items-center gap-0.5">
+            {category && (
+              <span
+                className={cn(
+                  "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-[family-name:var(--font-zain)]",
+                  CATEGORY_COLORS[category],
+                )}
+              >
+                {tCategories(category)}
+              </span>
+            )}
+            {isOwn && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-5 shrink-0 rounded-md"
+                >
+                  <MoreVertical className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setEditing(true)}>
+                  <Pencil className="me-2 size-4" /> {t("edit")}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={handleDelete}
+                  className="text-destructive"
+                >
+                  <Trash2 className="me-2 size-4" /> {t("delete")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            )}
+          </div>
+        </div>
+        <div className="px-4 pb-3">
+          {editing ? (
+            <div className="space-y-2">
+              <Textarea
+                value={editContent}
+                onChange={(e) => setEditContent(e.target.value)}
+                className="min-h-25 rounded-xl"
+                maxLength={2000}
+                disabled={saving}
+              />
+              <div className="flex flex-wrap gap-2">
+                {POST_CATEGORIES.map((c) => {
+                  const Icon = CATEGORY_ICONS[c];
+                  const selected = editCategory === c;
+                  return (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setEditCategory(c)}
+                      disabled={saving}
+                      aria-pressed={selected}
+                      className={cn(
+                        "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors",
+                        selected
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border text-muted-foreground hover:bg-muted/60",
+                      )}
+                    >
+                      <Icon className="size-3.5" />
+                      {tCategories(c)}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  className="rounded-xl"
+                  onClick={handleSaveEdit}
+                  disabled={saving || (!editContent.trim() && !post.image_url && !post.video_url)}
+                >
+                  {saving && <Spinner />}
+                  {saving ? t("saving") : t("save")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="rounded-xl"
+                  onClick={() => {
+                    setEditing(false);
+                    setEditContent(post.content);
+                    setEditCategory((post.category as PostCategory) ?? "diaries");
+                  }}
+                  disabled={saving}
+                >
+                  {t("cancel")}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <p className="whitespace-pre-wrap wrap-break-word text-foreground">
+                {linkifyHashtags(post.content)}
+              </p>
+              {post.image_url && (
+                <div className="mt-3 overflow-hidden rounded-xl bg-muted">
+                  {/\.(mp4|webm|mov|m4v)(\?|$)/i.test(post.image_url) ? (
+                    <video
+                      src={post.image_url}
+                      controls
+                      controlsList="noplaybackrate"
+                      playsInline
+                      preload="metadata"
+                      className="mx-auto block h-auto max-h-[600px] w-full"
+                    />
+                  ) : post.image_width && post.image_height ? (
+                    <Image
+                      src={post.image_url}
+                      alt="Post image"
+                      width={post.image_width}
+                      height={post.image_height}
+                      sizes="(min-width: 1024px) 800px, 100vw"
+                      preload={priority}
+                      className="mx-auto block h-auto max-h-[600px] w-full object-contain"
+                    />
+                  ) : (
+                    /* eslint-disable-next-line @next/next/no-img-element -- no stored dimensions (legacy post), next/image requires them */
+                    <img
+                      src={post.image_url}
+                      alt="Post image"
+                      loading={priority ? "eager" : "lazy"}
+                      fetchPriority={priority ? "high" : undefined}
+                      className="mx-auto block h-auto max-h-[600px] w-full object-contain"
+                    />
+                  )}
+                </div>
+              )}
+              {post.video_url && <VideoEmbed url={post.video_url} orientation={post.video_orientation} />}
+            </>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 border-t border-border/60 px-4 py-3">
+          <LikeButton
+            postId={post.id}
+            initialCount={likeCount}
+            initialLiked={currentUserLiked}
+            likers={likers}
+          />
+          <CommentSection
+            postId={post.id}
+            initialComments={comments}
+            commentCount={commentCount}
+          />
+        </div>
+      </CardContent>
+
+      <Dialog
+        open={confirmDeleteOpen}
+        onOpenChange={(o) => !deleting && setConfirmDeleteOpen(o)}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{t("confirmDeleteTitle")}</DialogTitle>
+            <DialogDescription>
+              {t("confirmDeleteDescription")}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-full"
+              disabled={deleting}
+              onClick={() => setConfirmDeleteOpen(false)}
+            >
+              {t("cancel")}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              className="rounded-full"
+              disabled={deleting}
+              onClick={confirmDelete}
+            >
+              {deleting && <Spinner />}
+              {deleting ? t("deleting") : t("delete")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
+  );
+}
