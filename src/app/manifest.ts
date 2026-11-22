@@ -13,7 +13,8 @@ export default function manifest(): MetadataRoute.Manifest {
     start_url: "/dashboard",
     scope: "/",
     display: "standalone",
-    orientation: "portrait",
+    // "any" lets fullscreen videos rotate to landscape; "portrait" locks the installed app.
+    orientation: "any",
     theme_color: PWA_THEME_COLOR,
     background_color: PWA_BACKGROUND_COLOR,
     categories: ["social", "lifestyle"],
