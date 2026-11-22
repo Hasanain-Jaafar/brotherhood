@@ -30,13 +30,19 @@ export async function createBunnyUploadTicket(
     return { success: false, error: "Video upload is not configured." };
   }
 
+  // Optional: put every uploaded video into this Bunny collection.
+  const collectionId = process.env.BUNNY_STREAM_COLLECTION_ID;
+
   const createRes = await fetch(`${BUNNY_API_BASE}/library/${libraryId}/videos`, {
     method: "POST",
     headers: {
       AccessKey: apiKey,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ title: title.slice(0, 200) || "Untitled" }),
+    body: JSON.stringify({
+      title: title.slice(0, 200) || "Untitled",
+      ...(collectionId ? { collectionId } : {}),
+    }),
   });
 
   if (!createRes.ok) {
