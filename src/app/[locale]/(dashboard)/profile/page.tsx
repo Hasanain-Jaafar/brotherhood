@@ -32,15 +32,7 @@ export default async function ProfilePage({
         userId={user.id}
         email={user.email}
         initialName={profile?.name ?? null}
-        initialBio={profile?.bio ?? null}
         initialAvatarUrl={profile?.avatar_url ?? null}
-        initialLocation={profile?.location ?? null}
-        initialPronouns={profile?.pronouns ?? null}
-        initialInterests={profile?.interests ?? null}
-        initialBirthday={profile?.birthday ?? null}
-        initialShowBirthday={profile?.show_birthday ?? null}
-        initialShowAge={profile?.show_age ?? null}
-        initialShowLocation={profile?.show_location ?? null}
       />
     </div>
   );

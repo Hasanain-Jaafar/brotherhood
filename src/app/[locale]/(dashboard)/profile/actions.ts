@@ -31,14 +31,6 @@ export async function updateProfile(
   const d = parsed.data;
   const updates: Record<string, unknown> = {
     name: d.name ?? null,
-    bio: d.bio ?? null,
-    location: d.location ?? null,
-    pronouns: d.pronouns ?? null,
-    interests: d.interests ?? [],
-    birthday: d.birthday ? d.birthday : null,
-    show_birthday: d.show_birthday ?? true,
-    show_age: d.show_age ?? true,
-    show_location: d.show_location ?? true,
   };
   if (input.avatar_url !== undefined) {
     updates.avatar_url = input.avatar_url;
